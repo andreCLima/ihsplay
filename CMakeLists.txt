@@ -97,6 +97,11 @@ target_include_directories(lvgl SYSTEM PRIVATE ${FREETYPE_INCLUDE_DIRS})
 target_link_libraries(lvgl PRIVATE ${SDL2_LIBRARIES} ${FREETYPE_LIBRARIES})
 target_compile_definitions(lvgl PUBLIC LV_CONF_PATH=../../../app/lvgl/lv_conf.h)
 
+# Newer ss4s fetches its own commons-c (FetchContent) but only for its samples, and pulls the
+# webos-userland headers for the NDL modules. Keep samples/tests off so that second copy of
+# `commons` is never declared next to third_party/commons below.
+set(SS4S_ENABLE_SAMPLES OFF)
+set(SS4S_ENABLE_TESTS OFF)
 add_subdirectory(third_party/ss4s)
 add_subdirectory(third_party/commons)
 
