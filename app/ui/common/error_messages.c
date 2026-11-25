@@ -14,6 +14,8 @@ const char *authorization_result_str(IHS_AuthorizationResult result) {
             return "Authorization timed out";
         case IHS_AuthorizationCanceled:
             return "Authorization cancelled";
+        case IHS_AuthorizationFailed:
+            return "Pairing failed (wrong PIN?)";
         default:
             return "Unknown error";
     }

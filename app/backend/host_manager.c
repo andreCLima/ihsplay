@@ -1,4 +1,6 @@
 #include <assert.h>
+#include <inttypes.h>
+#include <stdio.h>
 
 #include "app.h"
 #include "host_manager.h"
@@ -15,7 +17,20 @@ struct host_manager_t {
     SDL_TimerID timer;
     array_list_t *hosts;
     array_list_t *listeners;
+    /** host_key_t, the secret key negotiated with each host when pairing */
+    array_list_t *host_keys;
 };
+
+/**
+ * Current Steam pairs with a key exchange, so every host has its own secret key. It has to survive a restart of the
+ * app, otherwise the TV would need to pair again every time.
+ */
+typedef struct host_key_t {
+    uint64_t client_id;
+    uint8_t key[32];
+} host_key_t;
+
+#define HOST_KEYS_FILE "host_keys.txt"
 
 typedef struct host_manager_session_error_t {
     IHS_HostInfo host;
@@ -25,6 +40,7 @@ typedef struct host_manager_session_error_t {
 typedef struct host_manager_authorization_result_t {
     IHS_HostInfo host;
     uint64_t steam_id;
+    uint8_t secret_key[32];
 } host_manager_authorization_result_t;
 
 typedef struct host_manager_streaming_result_t {
@@ -58,6 +74,12 @@ static void client_authorization_failed_main(app_t *app, void *data);
 
 static int compare_host_name(const void *a, const void *b);
 
+static host_key_t *host_keys_find(host_manager_t *manager, uint64_t client_id);
+
+static void host_keys_load(host_manager_t *manager);
+
+static void host_keys_save(host_manager_t *manager);
+
 static const IHS_ClientDiscoveryCallbacks discovery_callbacks = {
         .discovered = client_host_discovered,
 };
@@ -78,6 +100,8 @@ host_manager_t *host_manager_create(app_t *app) {
     manager->client = IHS_ClientCreate(&app->client_info.config);
     manager->hosts = array_list_create(sizeof(IHS_HostInfo), 16);
     manager->listeners = listeners_list_create();
+    manager->host_keys = array_list_create(sizeof(host_key_t), 4);
+    host_keys_load(manager);
     IHS_ClientSetLogFunction(manager->client, app_ihs_log);
     IHS_ClientSetDiscoveryCallbacks(manager->client, &discovery_callbacks, manager);
     IHS_ClientSetAuthorizationCallbacks(manager->client, &authorization_callbacks, manager);
@@ -90,6 +114,7 @@ void host_manager_destroy(host_manager_t *manager) {
     IHS_ClientThreadedJoin(manager->client);
     IHS_ClientDestroy(manager->client);
     listeners_list_destroy(manager->listeners);
+    array_list_destroy(manager->host_keys);
     array_list_destroy(manager->hosts);
     SDL_free(manager);
 }
@@ -115,6 +140,9 @@ void host_manager_session_request(host_manager_t *manager, const IHS_HostInfo *h
             .maxResolution.x = 1920,
             .maxResolution.y = 1080,
     };
+    // Hosts paired before the key exchange (or never paired) still use the device's own key.
+    const host_key_t *host_key = host_keys_find(manager, host->clientId);
+    IHS_ClientSetSecretKey(manager->client, host_key != NULL ? host_key->key : manager->app->client_info.config.secretKey);
     IHS_ClientStreamingRequest(manager->client, host, &request);
 }
 
@@ -144,11 +172,11 @@ static void client_host_discovered(IHS_Client *client, const IHS_HostInfo *host,
 
 static void client_authorization_success(IHS_Client *client, const IHS_HostInfo *host, uint64_t steamId,
                                          void *context) {
-    (void) client;
     host_manager_t *manager = context;
     host_manager_authorization_result_t *result = SDL_calloc(1, sizeof(host_manager_authorization_result_t));
     result->host = *host;
     result->steam_id = steamId;
+    IHS_ClientGetSecretKey(client, result->secret_key);
     app_run_on_main(manager->app, client_authorization_success_main, result);
 }
 
@@ -245,10 +273,85 @@ static void client_streaming_failed_main(app_t *app, void *data) {
 static void client_authorization_success_main(app_t *app, void *data) {
     host_manager_t *manager = app->host_manager;
     host_manager_authorization_result_t *result = data;
+    host_key_t *host_key = host_keys_find(manager, result->host.clientId);
+    if (host_key == NULL) {
+        host_key = array_list_add(manager->host_keys, -1);
+        host_key->client_id = result->host.clientId;
+    }
+    SDL_memcpy(host_key->key, result->secret_key, sizeof(host_key->key));
+    host_keys_save(manager);
     listeners_list_notify(manager->listeners, host_manager_listener_t, authorized, &result->host,
                           result->steam_id);
     SDL_free(result);
+}
 
+static host_key_t *host_keys_find(host_manager_t *manager, uint64_t client_id) {
+    for (int i = 0, j = array_list_size(manager->host_keys); i < j; ++i) {
+        host_key_t *item = array_list_get(manager->host_keys, i);
+        if (item->client_id == client_id) {
+            return item;
+        }
+    }
+    return NULL;
+}
+
+static char *host_keys_path() {
+    char *dir = SDL_GetPrefPath("mariotaku", "ihsplay");
+    if (dir == NULL) {
+        commons_log_warn("Hosts", "No writable directory for the host keys: %s", SDL_GetError());
+        return NULL;
+    }
+    size_t len = SDL_strlen(dir) + sizeof(HOST_KEYS_FILE);
+    char *path = SDL_malloc(len);
+    SDL_snprintf(path, len, "%s%s", dir, HOST_KEYS_FILE);
+    SDL_free(dir);
+    return path;
+}
+
+/* One host per line: client ID and secret key, both in hex. */
+static void host_keys_load(host_manager_t *manager) {
+    char *path = host_keys_path();
+    if (path == NULL) return;
+    FILE *file = fopen(path, "r");
+    SDL_free(path);
+    if (file == NULL) return;
+    uint64_t client_id;
+    char key_hex[65];
+    while (fscanf(file, "%" SCNx64 " %64s", &client_id, key_hex) == 2) {
+        if (SDL_strlen(key_hex) != 64) continue;
+        host_key_t entry = {.client_id = client_id};
+        bool valid = true;
+        for (int i = 0; i < 32 && valid; ++i) {
+            unsigned int byte;
+            valid = sscanf(&key_hex[i * 2], "%2x", &byte) == 1;
+            entry.key[i] = (uint8_t) byte;
+        }
+        if (!valid || host_keys_find(manager, client_id) != NULL) continue;
+        *(host_key_t *) array_list_add(manager->host_keys, -1) = entry;
+    }
+    fclose(file);
+    commons_log_info("Hosts", "Loaded %d paired host key(s)", array_list_size(manager->host_keys));
+}
+
+static void host_keys_save(host_manager_t *manager) {
+    char *path = host_keys_path();
+    if (path == NULL) return;
+    FILE *file = fopen(path, "w");
+    if (file == NULL) {
+        commons_log_error("Hosts", "Can't write %s", path);
+        SDL_free(path);
+        return;
+    }
+    SDL_free(path);
+    for (int i = 0, j = array_list_size(manager->host_keys); i < j; ++i) {
+        const host_key_t *item = array_list_get(manager->host_keys, i);
+        fprintf(file, "%" PRIx64 " ", item->client_id);
+        for (int k = 0; k < 32; ++k) {
+            fprintf(file, "%02x", item->key[k]);
+        }
+        fputc('\n', file);
+    }
+    fclose(file);
 }
 
 static void client_authorization_failed_main(app_t *app, void *data) {
