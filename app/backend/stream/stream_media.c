@@ -75,6 +75,11 @@ stream_media_session_t *stream_media_create(stream_manager_t *manager) {
 }
 
 void stream_media_destroy(stream_media_session_t *media_session) {
+    // In case audio_stop never ran
+    if (media_session->opus_decoder != NULL) {
+        opus_multistream_decoder_destroy(media_session->opus_decoder);
+    }
+    free(media_session->pcm_buffer);
     SS4S_PlayerClose(media_session->player);
     SDL_DestroyMutex(media_session->lock);
     SDL_DestroyMutex(media_session->audio_lock);
@@ -181,7 +186,12 @@ static int audio_start(IHS_Session *session, const IHS_StreamAudioConfig *config
             .appName = "IHSplay",
             .streamName = "Streaming",
     };
-    return SS4S_PlayerAudioOpen(media_session->player, &info);
+    int open_result = SS4S_PlayerAudioOpen(media_session->player, &info);
+    if (open_result != SS4S_AUDIO_OPEN_OK) {
+        // The session may not call stop for a start that failed; audio_stop is safe to run twice.
+        audio_stop(session, context);
+    }
+    return open_result;
 }
 
 /* Most lost frames in a row to conceal. Past a few, a gap sounds better than repeated guesses. */
