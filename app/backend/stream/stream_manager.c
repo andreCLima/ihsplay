@@ -278,6 +278,17 @@ static void session_finalized(IHS_Session *session, void *context) {
     app_run_on_main(manager->app, destroy_session_main, session);
 }
 
+/*
+ * Bitrate to ask Steam for. A fixed 20 Mbit/s is also tizen-steam-link's default and the setting proven on this TV:
+ * keyframes arrive whole. IHS_SESSION_BITRATE_ADAPTIVE lets Steam lower the bitrate on reported loss and raise it
+ * again, but up to 30 Mbit/s, the rate whose keyframes lost a packet (a freeze of seconds while keepPlayingAfterLoss
+ * is off), and it has not run on this TV yet. To try it without touching the code, build with
+ * -DSTREAM_BITRATE_KBPS=IHS_SESSION_BITRATE_ADAPTIVE; it should become a setting once it has proven itself.
+ */
+#ifndef STREAM_BITRATE_KBPS
+#define STREAM_BITRATE_KBPS 20000
+#endif
+
 static void session_configuring(IHS_Session *session, IHS_SessionConfig *config, void *context) {
     (void) session;
     stream_manager_t *manager = (stream_manager_t *) context;
@@ -288,7 +299,7 @@ static void session_configuring(IHS_Session *session, IHS_SessionConfig *config,
     // Wi-Fi; the old fixed 30 Mbit/s lost a packet of almost every keyframe.
     config->enableFec = true;
     config->quality = 2;
-    config->bitrateKbps = 20000;
+    config->bitrateKbps = STREAM_BITRATE_KBPS;
     config->maxWidth = 1920;
     config->maxHeight = 1080;
     config->maxFramerate = 60;
