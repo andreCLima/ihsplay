@@ -283,6 +283,16 @@ static void session_configuring(IHS_Session *session, IHS_SessionConfig *config,
     stream_manager_t *manager = (stream_manager_t *) context;
     assert (manager->media != NULL);
     config->enableHevc = stream_media_supports_hevc(manager->media);
+    // Same defaults as tizen-steam-link. FEC rebuilds one lost packet per video message instead of costing a
+    // keyframe, and 20 Mbit/s (Moonlight's default for 1080p60) keeps keyframes small enough to arrive whole on
+    // Wi-Fi; the old fixed 30 Mbit/s lost a packet of almost every keyframe.
+    config->enableFec = true;
+    config->quality = 2;
+    config->bitrateKbps = 20000;
+    config->maxWidth = 1920;
+    config->maxHeight = 1080;
+    config->maxFramerate = 60;
+    config->keepPlayingAfterLoss = false;
 }
 
 static void session_connected(IHS_Session *session, void *context) {
