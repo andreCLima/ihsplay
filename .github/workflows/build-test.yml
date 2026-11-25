@@ -59,6 +59,8 @@ jobs:
       - name: Build
         env:
           TOOLCHAIN_FILE: /tmp/arm-webos-linux-gnueabi_sdk-buildroot/usr/share/buildroot/toolchainfile.cmake
+          # The runner ships CMake 4, which refuses opus 1.4's cmake_minimum_required(< 3.5).
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
         run: ./tools/webos/easy_build.sh -DCMAKE_BUILD_TYPE=$BUILD_TYPE
 
       - name: Add Commit Hash Suffix
