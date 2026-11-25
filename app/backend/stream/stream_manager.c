@@ -284,9 +284,9 @@ static void session_finalized(IHS_Session *session, void *context) {
     stream_manager_t *manager = (stream_manager_t *) context;
     assert(manager->state == STREAM_MANAGER_STATE_DISCONNECTING);
     assert(manager->session == session);
-    manager->state = STREAM_MANAGER_STATE_IDLE;
-    commons_log_info("StreamManager", "Change state to IDLE");
-    // The media belongs to this session: a new session may already own manager->media when the destroy runs.
+    // Stay DISCONNECTING: this runs on the session thread, and going IDLE here would let the main thread start a new
+    // session (and a new media) before the old ones are destroyed. destroy_session_main, on the main thread, destroys
+    // both and only then goes IDLE.
     destroy_context_t *dc = calloc(1, sizeof(destroy_context_t));
     dc->session = session;
     dc->media = manager->media;
@@ -408,8 +408,11 @@ static void session_show_cursor_main(app_t *app, void *context) {
 
 static void destroy_session_main(app_t *app, void *context) {
     destroy_context_t *dc = context;
-    destroy_session(app->stream_manager, dc->session, dc->media);
+    stream_manager_t *manager = app->stream_manager;
+    destroy_session(manager, dc->session, dc->media);
     free(dc);
+    manager->state = STREAM_MANAGER_STATE_IDLE;
+    commons_log_info("StreamManager", "Change state to IDLE");
 }
 
 static void destroy_session(stream_manager_t *manager, IHS_Session *session, stream_media_session_t *media) {
@@ -418,10 +421,7 @@ static void destroy_session(stream_manager_t *manager, IHS_Session *session, str
     if (media != NULL) {
         stream_media_destroy(media);
     }
-    // Only forget the media if it is still the one just destroyed; a new session may have created its own.
-    if (manager->media == media) {
-        manager->media = NULL;
-    }
+    manager->media = NULL;
 }
 
 static void controller_back_pressed(stream_manager_t *manager) {
