@@ -1,4 +1,6 @@
 #include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include "session.h"
 #include "ihslib.h"
 #include "ui/app_ui.h"
@@ -12,6 +14,13 @@
 #include "backend/input_manager.h"
 #include "logging.h"
 #include "config.h"
+#include "ui/connection/connection_fragment.h"
+
+/* What the "Disconnected" dialog needs to start a new session with the same host once the fragment is gone. */
+typedef struct reconnect_data_t {
+    app_t *app;
+    IHS_HostInfo host;
+} reconnect_data_t;
 
 typedef struct session_fragment_t {
     lv_fragment_t base;
@@ -62,7 +71,7 @@ const lv_fragment_class_t session_fragment_class = {
 
 static void session_connected_main(const IHS_SessionInfo *info, void *context);
 
-static void session_disconnected_main(const IHS_SessionInfo *info, bool requested, void *context);
+static void session_disconnected_main(const IHS_SessionInfo *info, bool requested, bool timed_out, void *context);
 
 static void session_overlay_progress(int percentage, void *context);
 
@@ -87,6 +96,8 @@ static void session_cursor_image(IHS_Session *session, const IHS_StreamInputCurs
 static const cursor_t *session_current_cursor(session_fragment_t *fragment);
 
 static void disconnected_dialog_cb(lv_event_t *e);
+
+static void disconnected_dialog_free_cb(lv_event_t *e);
 
 static void screen_clicked_cb(lv_event_t *e);
 
@@ -241,14 +252,33 @@ static void session_connected_main(const IHS_SessionInfo *info, void *context) {
     }
 }
 
-static void session_disconnected_main(const IHS_SessionInfo *info, bool requested, void *context) {
+static void session_disconnected_main(const IHS_SessionInfo *info, bool requested, bool timed_out, void *context) {
     LV_UNUSED(info);
     session_fragment_t *fragment = (session_fragment_t *) context;
 //    SDL_SetCursor(SDL_GetDefaultCursor());
     if (!requested) {
-        static const char *btn_txts[] = {"OK", ""};
-        lv_obj_t *mbox = lv_msgbox_create(NULL, NULL, "Disconnected.", btn_txts, false);
-        lv_obj_add_event_cb(mbox, disconnected_dialog_cb, LV_EVENT_VALUE_CHANGED, NULL);
+        static const char *btn_txts_ok[] = {"OK", ""};
+        static const char *btn_txts_reconnect[] = {"Reconnect", "Close", ""};
+        char text[160];
+        const char *host_name = fragment->args.host.hostname;
+        if (timed_out) {
+            snprintf(text, sizeof(text), "Lost the connection to %s: it stopped responding. Check the Wi-Fi.",
+                     host_name);
+        } else {
+            snprintf(text, sizeof(text), "%s ended the stream.", host_name);
+        }
+        // A session without a key (debug builds only) has nothing to reconnect to
+        bool can_reconnect = fragment->args.session.sessionKeyLen > 0;
+        lv_obj_t *mbox = lv_msgbox_create(NULL, NULL, text, can_reconnect ? btn_txts_reconnect : btn_txts_ok, false);
+        reconnect_data_t *reconnect = NULL;
+        if (can_reconnect) {
+            // The session fragment is popped right below, so the dialog keeps its own copy of the host.
+            reconnect = calloc(1, sizeof(reconnect_data_t));
+            reconnect->app = fragment->app;
+            reconnect->host = fragment->args.host;
+            lv_obj_add_event_cb(mbox, disconnected_dialog_free_cb, LV_EVENT_DELETE, reconnect);
+        }
+        lv_obj_add_event_cb(mbox, disconnected_dialog_cb, LV_EVENT_VALUE_CHANGED, reconnect);
         lv_obj_center(mbox);
     }
     app_ui_pop_top_fragment(fragment->app->ui);
@@ -341,7 +371,19 @@ static void session_cursor_image(IHS_Session *session, const IHS_StreamInputCurs
 
 static void disconnected_dialog_cb(lv_event_t *e) {
     lv_obj_t *msgbox = lv_event_get_current_target(e);
+    reconnect_data_t *reconnect = lv_event_get_user_data(e);
+    // Button 0 is "Reconnect". Go through the same path as picking the host in the launcher: it asks the host for a
+    // fresh session, so a host that is still unreachable ends in the usual connection error page.
+    if (reconnect != NULL && lv_msgbox_get_active_btn(msgbox) == 0) {
+        IHS_HostInfo *host = calloc(1, sizeof(IHS_HostInfo));
+        *host = reconnect->host;
+        app_ui_push_fragment(reconnect->app->ui, &connection_fragment_class, host);
+    }
     lv_msgbox_close_async(msgbox);
+}
+
+static void disconnected_dialog_free_cb(lv_event_t *e) {
+    free(lv_event_get_user_data(e));
 }
 
 static void screen_clicked_cb(lv_event_t *e) {

@@ -52,6 +52,10 @@ static void grab_mouse(stream_manager_t *manager, bool grab);
 
 #define BACK_COUNTER_MAX 100
 
+// Bits of event_context_t.value1 for a disconnect
+#define DISCONNECT_REQUESTED 1u
+#define DISCONNECT_TIMED_OUT 2u
+
 typedef struct event_context_t {
     stream_manager_t *manager;
     void *arg1;
@@ -331,12 +335,16 @@ static void session_disconnected(IHS_Session *session, void *context) {
         manager->back_timer = 0;
     }
     bool requested = manager->requested_disconnect;
+    // ihslib reports no reason, but it flags the one case that matters here: the host went silent.
+    IHS_SessionStreamStats stats = {0};
+    IHS_SessionGetStreamStats(session, &stats);
     manager->state = STREAM_MANAGER_STATE_DISCONNECTING;
-    commons_log_info("StreamManager", "Change state to DISCONNECTING");
+    commons_log_info("StreamManager", "Change state to DISCONNECTING (requested=%d, timedOut=%d)", requested,
+                     stats.timedOut);
     event_context_t ec = {
             .manager = manager,
             .arg1 = (void *) IHS_SessionGetInfo(session),
-            .value1 = requested
+            .value1 = (requested ? DISCONNECT_REQUESTED : 0) | (stats.timedOut ? DISCONNECT_TIMED_OUT : 0)
     };
     app_run_on_main_sync(manager->app, session_disconnected_main, &ec);
 }
@@ -374,7 +382,8 @@ static void session_disconnected_main(app_t *app, void *context) {
     stream_manager_t *manager = ec->manager;
     grab_mouse(manager, false);
     listeners_list_notify(manager->listeners, stream_manager_listener_t, disconnected,
-                          (const IHS_SessionInfo *) ec->arg1, ec->value1);
+                          (const IHS_SessionInfo *) ec->arg1, (ec->value1 & DISCONNECT_REQUESTED) != 0,
+                          (ec->value1 & DISCONNECT_TIMED_OUT) != 0);
 }
 
 static void session_show_cursor_main(app_t *app, void *context) {

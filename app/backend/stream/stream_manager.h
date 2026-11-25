@@ -12,7 +12,11 @@ typedef struct stream_manager_t stream_manager_t;
 typedef struct stream_manager_callbacks_t {
     void (*connected)(const IHS_SessionInfo *info, void *context);
 
-    void (*disconnected)(const IHS_SessionInfo *info, bool requested, void *context);
+    /**
+     * @param requested The user (or the app) ended the session
+     * @param timed_out The host went silent and ihslib gave up, which is what a dropped Wi-Fi looks like
+     */
+    void (*disconnected)(const IHS_SessionInfo *info, bool requested, bool timed_out, void *context);
 
     void (*overlay_progress)(int percentage, void *context);
 
