@@ -20,6 +20,7 @@
 typedef struct reconnect_data_t {
     app_t *app;
     IHS_HostInfo host;
+    bool used; // a second click before the dialog closes must not push a second connection
 } reconnect_data_t;
 
 typedef struct session_fragment_t {
@@ -36,6 +37,9 @@ typedef struct session_fragment_t {
 
     lv_obj_t *overlay_hint;
     lv_obj_t *overlay_progress;
+
+    lv_timer_t *start_timer;
+    int start_tries;
 
     struct {
         lv_style_t overlay;
@@ -96,6 +100,11 @@ static void session_cursor_image(IHS_Session *session, const IHS_StreamInputCurs
 static const cursor_t *session_current_cursor(session_fragment_t *fragment);
 
 static void disconnected_dialog_cb(lv_event_t *e);
+
+#define START_RETRY_MS 200
+#define START_RETRY_MAX 25 // 5 s
+
+static void start_retry_cb(lv_timer_t *timer);
 
 static void disconnected_dialog_free_cb(lv_event_t *e);
 
@@ -195,7 +204,11 @@ static void obj_created(lv_fragment_t *self, lv_obj_t *obj) {
     stream_manager_t *stream_manager = fragment->app->stream_manager;
     stream_manager_register_listener(stream_manager, &stream_manager_listener, fragment);
     if (fragment->args.session.sessionKeyLen > 0) {
-        stream_manager_start_session(stream_manager, &fragment->args.session);
+        if (!stream_manager_start_session(stream_manager, &fragment->args.session)) {
+            // The previous session is still shutting down (Reconnect right after a drop). Try again shortly.
+            commons_log_warn("Session", "Stream manager busy, will retry");
+            fragment->start_timer = lv_timer_create(start_retry_cb, START_RETRY_MS, fragment);
+        }
     }
 
     app_ui_set_ignore_keys(fragment->app->ui, true);
@@ -209,6 +222,10 @@ static void obj_will_delete(lv_fragment_t *self, lv_obj_t *obj) {
     app_ui_set_ignore_keys(fragment->app->ui, false);
 
     stream_manager_unregister_listener(fragment->app->stream_manager, &stream_manager_listener);
+    if (fragment->start_timer != NULL) {
+        lv_timer_del(fragment->start_timer);
+        fragment->start_timer = NULL;
+    }
 
     lv_obj_set_style_bg_opa(lv_scr_act(), LV_OPA_COVER, 0);
 }
@@ -374,12 +391,33 @@ static void disconnected_dialog_cb(lv_event_t *e) {
     reconnect_data_t *reconnect = lv_event_get_user_data(e);
     // Button 0 is "Reconnect". Go through the same path as picking the host in the launcher: it asks the host for a
     // fresh session, so a host that is still unreachable ends in the usual connection error page.
-    if (reconnect != NULL && lv_msgbox_get_active_btn(msgbox) == 0) {
+    if (reconnect != NULL && !reconnect->used && lv_msgbox_get_active_btn(msgbox) == 0) {
+        reconnect->used = true;
         IHS_HostInfo *host = calloc(1, sizeof(IHS_HostInfo));
         *host = reconnect->host;
         app_ui_push_fragment(reconnect->app->ui, &connection_fragment_class, host);
     }
     lv_msgbox_close_async(msgbox);
+}
+
+static void start_retry_cb(lv_timer_t *timer) {
+    session_fragment_t *fragment = timer->user_data;
+    if (stream_manager_start_session(fragment->app->stream_manager, &fragment->args.session)) {
+        lv_timer_del(timer);
+        fragment->start_timer = NULL;
+        return;
+    }
+    if (++fragment->start_tries < START_RETRY_MAX) {
+        return;
+    }
+    lv_timer_del(timer);
+    fragment->start_timer = NULL;
+    commons_log_error("Session", "Stream manager never became idle, giving up");
+    static const char *btn_txts[] = {"OK", ""};
+    lv_obj_t *mbox = lv_msgbox_create(NULL, NULL, "Could not start the stream. Try again.", btn_txts, false);
+    lv_obj_add_event_cb(mbox, disconnected_dialog_cb, LV_EVENT_VALUE_CHANGED, NULL);
+    lv_obj_center(mbox);
+    app_ui_pop_top_fragment(fragment->app->ui);
 }
 
 static void disconnected_dialog_free_cb(lv_event_t *e) {
