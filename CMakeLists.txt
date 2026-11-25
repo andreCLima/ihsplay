@@ -29,6 +29,9 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/core/scripts ${CMAKE_SOURCE_DI
 option(IHSPLAY_WIP_FEATURES "Enable Work-in-Progress Features" OFF)
 option(IHSPLAY_FEATURE_FORCE_FULLSCREEN "Force full screen mode" OFF)
 
+# Bitrate asked of Steam in kbit/s: 20000 fixed, -1 Steam decides, -2 adaptive (see stream_manager.c)
+set(STREAM_BITRATE_KBPS "20000" CACHE STRING "Streaming bitrate in kbit/s (-2 = adaptive)")
+
 set(IHSPLAY_FEATURE_LIBCEC ON)
 
 option(COMMONS_LV_SDL_IMG_USE_IMAGE "Don't use SDL_Image" OFF)
@@ -109,6 +112,7 @@ set(CMAKE_C_STANDARD 11)
 
 add_subdirectory(app)
 target_include_directories(ihsplay PRIVATE app)
+target_compile_definitions(ihsplay PRIVATE STREAM_BITRATE_KBPS=${STREAM_BITRATE_KBPS})
 
 target_link_libraries(ihsplay PRIVATE lvgl ihslib ihslib-hid-sdl ss4s commons-array-list commons-os-info
         commons-logging commons-ss4s-modules-list)

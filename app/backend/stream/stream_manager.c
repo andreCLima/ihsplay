@@ -38,6 +38,8 @@ static void session_show_cursor_main(app_t *app, void *context);
 
 static void destroy_session_main(app_t *app, void *context);
 
+static void destroy_session(stream_manager_t *manager, IHS_Session *session, stream_media_session_t *media);
+
 static void controller_back_pressed(stream_manager_t *manager);
 
 static void controller_back_released(stream_manager_t *manager);
@@ -55,6 +57,11 @@ static void grab_mouse(stream_manager_t *manager, bool grab);
 // Bits of event_context_t.value1 for a disconnect
 #define DISCONNECT_REQUESTED 1u
 #define DISCONNECT_TIMED_OUT 2u
+
+typedef struct destroy_context_t {
+    IHS_Session *session;
+    stream_media_session_t *media;
+} destroy_context_t;
 
 typedef struct event_context_t {
     stream_manager_t *manager;
@@ -91,7 +98,7 @@ void stream_manager_destroy(stream_manager_t *manager) {
             break;
         }
         default: {
-            destroy_session_main(manager->app, manager->session);
+            destroy_session(manager, manager->session, manager->media);
             break;
         }
     }
@@ -279,15 +286,20 @@ static void session_finalized(IHS_Session *session, void *context) {
     assert(manager->session == session);
     manager->state = STREAM_MANAGER_STATE_IDLE;
     commons_log_info("StreamManager", "Change state to IDLE");
-    app_run_on_main(manager->app, destroy_session_main, session);
+    // The media belongs to this session: a new session may already own manager->media when the destroy runs.
+    destroy_context_t *dc = calloc(1, sizeof(destroy_context_t));
+    dc->session = session;
+    dc->media = manager->media;
+    app_run_on_main(manager->app, destroy_session_main, dc);
 }
 
 /*
  * Bitrate to ask Steam for. A fixed 20 Mbit/s is also tizen-steam-link's default and the setting proven on this TV:
  * keyframes arrive whole. IHS_SESSION_BITRATE_ADAPTIVE lets Steam lower the bitrate on reported loss and raise it
  * again, but up to 30 Mbit/s, the rate whose keyframes lost a packet (a freeze of seconds while keepPlayingAfterLoss
- * is off), and it has not run on this TV yet. To try it without touching the code, build with
- * -DSTREAM_BITRATE_KBPS=IHS_SESSION_BITRATE_ADAPTIVE; it should become a setting once it has proven itself.
+ * is off), and it has not run on this TV yet. To try it without touching the code, configure with
+ * -DSTREAM_BITRATE_KBPS=-2 (the CMake cache option of the same name; -2 is IHS_SESSION_BITRATE_ADAPTIVE). It should
+ * become a setting once it has proven itself.
  */
 #ifndef STREAM_BITRATE_KBPS
 #define STREAM_BITRATE_KBPS 20000
@@ -395,12 +407,21 @@ static void session_show_cursor_main(app_t *app, void *context) {
 }
 
 static void destroy_session_main(app_t *app, void *context) {
-    (void) app;
-    IHS_Session *session = context;
+    destroy_context_t *dc = context;
+    destroy_session(app->stream_manager, dc->session, dc->media);
+    free(dc);
+}
+
+static void destroy_session(stream_manager_t *manager, IHS_Session *session, stream_media_session_t *media) {
     IHS_SessionThreadedJoin(session);
     IHS_SessionDestroy(session);
-    stream_media_destroy(app->stream_manager->media);
-    app->stream_manager->media = NULL;
+    if (media != NULL) {
+        stream_media_destroy(media);
+    }
+    // Only forget the media if it is still the one just destroyed; a new session may have created its own.
+    if (manager->media == media) {
+        manager->media = NULL;
+    }
 }
 
 static void controller_back_pressed(stream_manager_t *manager) {
