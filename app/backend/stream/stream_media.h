@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdint.h>
 #include "ihslib.h"
 
 typedef struct stream_media_session_t stream_media_session_t;
@@ -19,3 +20,10 @@ bool stream_media_supports_hevc(stream_media_session_t *media_session);
 const IHS_StreamAudioCallbacks *stream_media_audio_callbacks();
 
 const IHS_StreamVideoCallbacks *stream_media_video_callbacks();
+
+typedef struct stream_media_stats_t {
+    /** Running totals since the media was created; take differences. Wrap around at 2^32. */
+    uint32_t video_frames, video_bytes, video_dropped, audio_packets, audio_lost_frames;
+} stream_media_stats_t;
+
+void stream_media_get_stats(stream_media_session_t *media_session, stream_media_stats_t *stats);

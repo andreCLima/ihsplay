@@ -27,6 +27,10 @@ struct stream_media_session_t {
     int last_frame_size;
 
     int pcm_buffer_size;
+    /* Counters for the periodic STATS log line, read from another thread */
+    SDL_atomic_t video_frames, video_bytes, video_dropped, audio_packets, audio_lost_frames;
+    bool nal_dump_logged;
+
     int viewport_width, viewport_height;
     int overlay_height;
 };
@@ -233,6 +237,7 @@ static int audio_submit(IHS_Session *session, IHS_Buffer *data, void *context) {
         return 0;
     }
     media_session->last_frame_size = decode_len;
+    SDL_AtomicAdd(&media_session->audio_packets, 1);
     int result = SS4S_PlayerAudioFeed(media_session->player, (const unsigned char *) media_session->pcm_buffer,
                                       media_session->pcm_unit_size * decode_len);
     SDL_UnlockMutex(media_session->audio_lock);
@@ -242,6 +247,7 @@ static int audio_submit(IHS_Session *session, IHS_Buffer *data, void *context) {
 static void audio_lost(IHS_Session *session, uint32_t frames, void *context) {
     (void) session;
     stream_media_session_t *media_session = (stream_media_session_t *) context;
+    SDL_AtomicAdd(&media_session->audio_lost_frames, (int) frames);
     SDL_LockMutex(media_session->audio_lock);
     if (media_session->opus_decoder == NULL || media_session->pcm_buffer == NULL) {
         SDL_UnlockMutex(media_session->audio_lock);
@@ -325,7 +331,12 @@ static IHS_StreamVideoSubmitResult video_submit(IHS_Session *session, IHS_Buffer
         }
         if (!dimension_parsed) {
             commons_log_warn("Media", "Can't parse NAL Unit.");
-            commons_log_hexdump(COMMONS_LOG_LEVEL_WARN, "Media", IHS_BufferPointer(data), data->size);
+            // The beginning is enough to tell what the host sent, and once per session keeps the log small.
+            if (!media_session->nal_dump_logged) {
+                media_session->nal_dump_logged = true;
+                commons_log_hexdump(COMMONS_LOG_LEVEL_WARN, "Media", IHS_BufferPointer(data),
+                                    data->size < 32 ? data->size : 32);
+            }
         }
         if (dimension_parsed && (dimension.width != media_session->video_info.width ||
                                  dimension.height != media_session->video_info.height)) {
@@ -342,14 +353,18 @@ static IHS_StreamVideoSubmitResult video_submit(IHS_Session *session, IHS_Buffer
                                                        sflgs);
     switch (result) {
         case SS4S_VIDEO_FEED_OK:
+            SDL_AtomicAdd(&media_session->video_frames, 1);
+            SDL_AtomicAdd(&media_session->video_bytes, (int) data->size);
             return IHS_StreamVideoSubmitOK;
         case SS4S_VIDEO_FEED_ERROR:
             // ihslib ends the session on IHS_StreamVideoSubmitError; a frame the TV's decoder refused is worth a
             // keyframe, not the whole stream.
+            SDL_AtomicAdd(&media_session->video_dropped, 1);
             commons_log_warn("Media", "Video feed failed, requesting a keyframe");
             return IHS_StreamVideoSubmitReportLost;
         default:
             // Not ready, or the decoder asks for a keyframe: either way this frame never reached the screen.
+            SDL_AtomicAdd(&media_session->video_dropped, 1);
             return IHS_StreamVideoSubmitReportLost;
     }
 }
@@ -359,4 +374,12 @@ static int video_set_capture_size(IHS_Session *session, int width, int height, v
     stream_media_session_t *media_session = (stream_media_session_t *) context;
     stream_manager_set_capture_size(media_session->manager, width, height);
     return 0;
+}
+
+void stream_media_get_stats(stream_media_session_t *media_session, stream_media_stats_t *stats) {
+    stats->video_frames = (uint32_t) SDL_AtomicGet(&media_session->video_frames);
+    stats->video_bytes = (uint32_t) SDL_AtomicGet(&media_session->video_bytes);
+    stats->video_dropped = (uint32_t) SDL_AtomicGet(&media_session->video_dropped);
+    stats->audio_packets = (uint32_t) SDL_AtomicGet(&media_session->audio_packets);
+    stats->audio_lost_frames = (uint32_t) SDL_AtomicGet(&media_session->audio_lost_frames);
 }

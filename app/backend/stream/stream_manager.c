@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <string.h>
 #include "stream_manager.h"
 #include "stream_manager_internal.h"
 
@@ -58,6 +59,10 @@ static void grab_mouse(stream_manager_t *manager, bool grab);
 #define DISCONNECT_REQUESTED 1u
 #define DISCONNECT_TIMED_OUT 2u
 
+#define STATS_INTERVAL_MS 5000
+
+static void stats_timer_cb(lv_timer_t *timer);
+
 typedef struct destroy_context_t {
     IHS_Session *session;
     stream_media_session_t *media;
@@ -93,6 +98,10 @@ stream_manager_t *stream_manager_create(app_t *app) {
 }
 
 void stream_manager_destroy(stream_manager_t *manager) {
+    if (manager->stats_timer != NULL) {
+        lv_timer_del(manager->stats_timer);
+        manager->stats_timer = NULL;
+    }
     switch (manager->state) {
         case STREAM_MANAGER_STATE_IDLE: {
             break;
@@ -320,6 +329,10 @@ static void session_configuring(IHS_Session *session, IHS_SessionConfig *config,
     config->maxHeight = 1080;
     config->maxFramerate = 60;
     config->keepPlayingAfterLoss = false;
+    commons_log_info("StreamManager", "Session config: hevc=%d fec=%d quality=%d bitrate=%d kbps max=%dx%d@%d fps"
+                                      " keepPlaying=%d",
+                     config->enableHevc, config->enableFec, config->quality, config->bitrateKbps, config->maxWidth,
+                     config->maxHeight, config->maxFramerate, config->keepPlayingAfterLoss);
 }
 
 static void session_connected(IHS_Session *session, void *context) {
@@ -385,6 +398,11 @@ static void session_connected_main(app_t *app, void *context) {
     event_context_t *ec = context;
     stream_manager_t *manager = ec->manager;
     listeners_list_notify(manager->listeners, stream_manager_listener_t, connected, (const IHS_SessionInfo *) ec->arg1);
+    memset(&manager->stats_prev, 0, sizeof(manager->stats_prev));
+    memset(&manager->media_stats_prev, 0, sizeof(manager->media_stats_prev));
+    if (manager->stats_timer == NULL) {
+        manager->stats_timer = lv_timer_create(stats_timer_cb, STATS_INTERVAL_MS, manager);
+    }
     grab_mouse(manager, true);
 }
 
@@ -392,6 +410,10 @@ static void session_disconnected_main(app_t *app, void *context) {
     (void) app;
     event_context_t *ec = context;
     stream_manager_t *manager = ec->manager;
+    if (manager->stats_timer != NULL) {
+        lv_timer_del(manager->stats_timer);
+        manager->stats_timer = NULL;
+    }
     grab_mouse(manager, false);
     listeners_list_notify(manager->listeners, stream_manager_listener_t, disconnected,
                           (const IHS_SessionInfo *) ec->arg1, (ec->value1 & DISCONNECT_REQUESTED) != 0,
@@ -484,4 +506,32 @@ static void back_timer_finish_main(app_t *app, void *context) {
     stream_manager_t *manager = (stream_manager_t *) context;
     stream_manager_set_overlay_opened(manager, true);
     listeners_list_notify(manager->listeners, stream_manager_listener_t, overlay_progress_finished, true);
+}
+
+/* One short line every few seconds: enough to see in the log when and how a stream degraded. Totals come from ihslib
+ * and from the media callbacks; the rates are differences since the previous line. Runs on the main thread, between
+ * connected_main and disconnected_main, so the session and media are alive. */
+static void stats_timer_cb(lv_timer_t *timer) {
+    stream_manager_t *manager = timer->user_data;
+    if (manager->state != STREAM_MANAGER_STATE_STREAMING || manager->session == NULL || manager->media == NULL) {
+        return;
+    }
+    IHS_SessionStreamStats s;
+    memset(&s, 0, sizeof(s));
+    IHS_SessionGetStreamStats(manager->session, &s);
+    stream_media_stats_t m;
+    stream_media_get_stats(manager->media, &m);
+    const stream_media_stats_t *pm = &manager->media_stats_prev;
+    const IHS_SessionStreamStats *ps = &manager->stats_prev;
+    const uint32_t secs = STATS_INTERVAL_MS / 1000;
+    commons_log_info("STATS", "fps=%u kbps=%u dropped=%u | pkts=%u lost=%u(+%u) lostRep=%u(+%u) fec=%d rec=%u unrec=%u"
+                              " | rtt=%.0fms | audio=%u lost=%u",
+                     (m.video_frames - pm->video_frames) / secs,
+                     (uint32_t) ((uint64_t) (m.video_bytes - pm->video_bytes) * 8 / (secs * 1000)),
+                     m.video_dropped - pm->video_dropped, s.videoPackets, s.videoPacketsLost,
+                     s.videoPacketsLost - ps->videoPacketsLost, s.lostReports, s.lostReports - ps->lostReports,
+                     s.fec, s.fecRecovered, s.fecUnrecoverable, (double) s.roundTripMs,
+                     m.audio_packets - pm->audio_packets, m.audio_lost_frames - pm->audio_lost_frames);
+    manager->stats_prev = s;
+    manager->media_stats_prev = m;
 }
