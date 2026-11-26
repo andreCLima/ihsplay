@@ -30,7 +30,7 @@ The app writes a log next to its folder; on webOS:
 `org.mariotaku.ihsplayihsplay.1.log`). For a detailed log, create an empty file
 `/media/developer/apps/usr/palm/applications/org.mariotaku.ihsplaydebug` (over SSH:
 `touch` that path) and restart the app; delete it to go back to the smaller normal log. The
-Support > Get Help screen shows both paths and whether the detailed log is on. While streaming,
+Support > Detailed log screen shows both paths and whether the detailed log is on. While streaming,
 the remote's red, green, yellow and blue keys put a mark in the log, to point at the moment a
 problem happened.
 
@@ -41,6 +41,6 @@ O app grava um log ao lado da própria pasta; no webOS:
 anterior fica em `org.mariotaku.ihsplayihsplay.1.log`). Para o log detalhado, crie um arquivo
 vazio `/media/developer/apps/usr/palm/applications/org.mariotaku.ihsplaydebug` (por SSH: `touch`
 nesse caminho) e reinicie o app; apague-o para voltar ao log normal, que fica menor. A tela
-Support > Get Help mostra os dois caminhos e se o log detalhado está ligado. Durante o streaming,
+Support > Detailed log mostra os dois caminhos e se o log detalhado está ligado. Durante o streaming,
 as teclas vermelha, verde, amarela e azul do controle remoto põem uma marca no log, para apontar o
 momento em que o problema aconteceu.

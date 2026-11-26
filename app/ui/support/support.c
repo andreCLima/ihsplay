@@ -1,13 +1,14 @@
 #include "support.h"
 #include "wiki.h"
 #include "feedback.h"
+#include "debuglog.h"
 #include "app.h"
 #include "lvgl/theme.h"
 #include "ui/app_ui.h"
 
 typedef struct support_fragment_t {
     lv_fragment_t base;
-    lv_coord_t col_dsc[3], row_dsc[4];
+    lv_coord_t col_dsc[3], row_dsc[5];
     lv_obj_t *win_content;
     int num_btns;
     app_t *app;
@@ -46,8 +47,9 @@ static void constructor(lv_fragment_t *self, void *args) {
     fragment->col_dsc[2] = LV_GRID_TEMPLATE_LAST;
     fragment->row_dsc[0] = LV_DPX(40);
     fragment->row_dsc[1] = LV_DPX(40);
-    fragment->row_dsc[2] = LV_GRID_FR(1);
-    fragment->row_dsc[3] = LV_GRID_TEMPLATE_LAST;
+    fragment->row_dsc[2] = LV_DPX(40);
+    fragment->row_dsc[3] = LV_GRID_FR(1);
+    fragment->row_dsc[4] = LV_GRID_TEMPLATE_LAST;
     fragment->num_btns = 0;
 }
 
@@ -67,6 +69,7 @@ static lv_obj_t *create_obj(lv_fragment_t *self, lv_obj_t *parent) {
 
     add_btn(fragment, fragment->win_content, "Get Help", &wiki_fragment_class);
     add_btn(fragment, fragment->win_content, "Feedback", &feedback_fragment_class);
+    add_btn(fragment, fragment->win_content, "Detailed log", &debuglog_fragment_class);
 
     return win;
 }
@@ -101,7 +104,7 @@ static void show_page(lv_fragment_t *self, const lv_fragment_class_t *cls) {
     support_fragment_t *fragment = (support_fragment_t *) self;
     lv_fragment_t *page = lv_fragment_create(cls, fragment->app);
     lv_fragment_manager_replace(self->child_manager, page, &fragment->win_content);
-    lv_obj_set_grid_cell(page->obj, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 0, 3);
+    lv_obj_set_grid_cell(page->obj, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_STRETCH, 0, 4);
 }
 
 static void btn_click_cb(lv_event_t *e) {
