@@ -106,7 +106,7 @@ static void rotate_locked(void) {
  */
 #define APPLOG_TAG_LINES_PER_SEC 20
 #define APPLOG_REPEAT_WINDOW_MS 1000
-#define APPLOG_TAG_SLOTS 16
+#define APPLOG_TAG_SLOTS 32
 #define APPLOG_TAG_LEN 32
 
 typedef struct tag_budget_t {
@@ -171,12 +171,32 @@ static void flush_repeats_locked(void) {
 /* Returns false if the budget of this tag for the current second is used up. */
 static bool tag_allowed_locked(commons_log_level level, const char *tag, int64_t now) {
     unsigned hash = 5381;
-    for (const char *c = tag; *c != '\0'; c++) {
+    for (const char *c = tag; *c != 0; c++) {
         hash = hash * 33 + (unsigned char) *c;
     }
-    tag_budget_t *b = &budgets[hash % APPLOG_TAG_SLOTS];
-    if (strncmp(b->tag, tag, APPLOG_TAG_LEN - 1) != 0) {
-        // Another tag sharing the slot: start over for this one
+    // Linear probing on the whole (truncated) tag, so two tags that hash alike keep separate budgets. If every slot
+    // is taken by other tags, the one with the oldest window is given up.
+    tag_budget_t *b = NULL;
+    tag_budget_t *oldest = &budgets[hash % APPLOG_TAG_SLOTS];
+    for (unsigned i = 0; i < APPLOG_TAG_SLOTS; i++) {
+        tag_budget_t *candidate = &budgets[(hash + i) % APPLOG_TAG_SLOTS];
+        if (strncmp(candidate->tag, tag, APPLOG_TAG_LEN - 1) == 0 && candidate->tag[0] != 0) {
+            b = candidate;
+            break;
+        }
+        if (candidate->tag[0] == 0) {
+            b = candidate;
+            memset(b, 0, sizeof(*b));
+            strncpy(b->tag, tag, APPLOG_TAG_LEN - 1);
+            b->window_start_ms = now;
+            break;
+        }
+        if (candidate->window_start_ms < oldest->window_start_ms) {
+            oldest = candidate;
+        }
+    }
+    if (b == NULL) {
+        b = oldest;
         if (b->dropped > 0) {
             notice_locked(COMMONS_LOG_LEVEL_WARN, b->tag, "%d messages dropped (rate limit)", b->dropped);
         }
@@ -234,6 +254,15 @@ void __wrap_commons_log_vprintf(commons_log_level level, const char *tag, const 
     va_list copy;
     va_copy(copy, arg);
     __real_commons_log_vprintf(level, tag, fmt, arg);
+
+    // Decide before formatting whether the file wants this level at all: Debug lines are the bulk when only Info is kept
+    pthread_mutex_lock(&lock);
+    bool wanted = !closed && level <= (open_attempted ? file_level : COMMONS_LOG_LEVEL_INFO);
+    pthread_mutex_unlock(&lock);
+    if (!wanted) {
+        va_end(copy);
+        return;
+    }
 
     char line[APPLOG_LINE_MAX];
     size_t body_offset = 0;
