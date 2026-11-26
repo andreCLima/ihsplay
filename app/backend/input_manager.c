@@ -62,7 +62,7 @@ void input_manager_sdl_gamepad_added(input_manager_t *manager, int which) {
 }
 
 void input_manager_sdl_gamepad_removed(input_manager_t *manager, SDL_JoystickID which) {
-    commons_log_info("Input", "Removing gamepad, instance_id: #%d.", which);
+    commons_log_warn("Input", "Gamepad #%d disconnected (SDL controller removed).", which);
     int index = manager_index(manager, which);
     assert(index >= 0);
     opened_controller_t *controller = array_list_get(&manager->controllers, index);

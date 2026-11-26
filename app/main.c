@@ -21,6 +21,7 @@
 #include "logging_ext_lvgl.h"
 #include "os_info.h"
 #include "util/applog.h"
+#include "util/input_stats.h"
 
 #if IHSPLAY_FEATURE_LIBCEC
 
@@ -137,6 +138,15 @@ int main(int argc, char *argv[]) {
 static void process_events() {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
+        input_stats_record(&event);
+        // A coloured key of the TV remote puts a mark in the log (see stream_manager_user_mark); it never reaches the
+        // stream or the UI.
+        if ((event.type == SDL_KEYDOWN || event.type == SDL_KEYUP) && input_stats_is_mark_key(&event.key)) {
+            if (event.type == SDL_KEYDOWN && !event.key.repeat) {
+                stream_manager_user_mark(app->stream_manager);
+            }
+            continue;
+        }
         switch (event.type) {
             case SDL_KEYUP:
             case SDL_KEYDOWN:

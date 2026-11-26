@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <stdio.h>
 #include <string.h>
 #include "stream_manager.h"
 #include "stream_manager_internal.h"
@@ -60,6 +61,8 @@ static void grab_mouse(stream_manager_t *manager, bool grab);
 #define DISCONNECT_TIMED_OUT 2u
 
 #define STATS_INTERVAL_MS 5000
+
+static void log_stats(stream_manager_t *manager);
 
 static void stats_timer_cb(lv_timer_t *timer);
 
@@ -399,6 +402,7 @@ static void session_connected_main(app_t *app, void *context) {
     stream_manager_t *manager = ec->manager;
     listeners_list_notify(manager->listeners, stream_manager_listener_t, connected, (const IHS_SessionInfo *) ec->arg1);
     memset(&manager->stats_prev, 0, sizeof(manager->stats_prev));
+    input_stats_get(&manager->input_prev);
     memset(&manager->media_stats_prev, 0, sizeof(manager->media_stats_prev));
     if (manager->stats_timer == NULL) {
         manager->stats_timer = lv_timer_create(stats_timer_cb, STATS_INTERVAL_MS, manager);
@@ -511,8 +515,7 @@ static void back_timer_finish_main(app_t *app, void *context) {
 /* One short line every few seconds: enough to see in the log when and how a stream degraded. Totals come from ihslib
  * and from the media callbacks; the rates are differences since the previous line. Runs on the main thread, between
  * connected_main and disconnected_main, so the session and media are alive. */
-static void stats_timer_cb(lv_timer_t *timer) {
-    stream_manager_t *manager = timer->user_data;
+static void log_stats(stream_manager_t *manager) {
     if (manager->state != STREAM_MANAGER_STATE_STREAMING || manager->session == NULL || manager->media == NULL) {
         return;
     }
@@ -539,4 +542,46 @@ static void stats_timer_cb(lv_timer_t *timer) {
                      s.hidFullReportRequests - ps->hidFullReportRequests, s.hidSlowJobs);
     manager->stats_prev = s;
     manager->media_stats_prev = m;
+
+    // What reached the app from the controller, to compare with what the stream then sent to the host.
+    input_stats_t in;
+    input_stats_get(&in);
+    const input_stats_t *pi = &manager->input_prev;
+    int last_pad_ms = in.last_pad_ticks == 0 ? -1 : (int) (SDL_GetTicks() - in.last_pad_ticks);
+    commons_log_info("INPUT", "pad buttons=%u(+%u) axes=%u(+%u) lastPadEvent=%dms ago | pads=%u added=%u removed=%u"
+                              " joyLost=%u | keys=%u(+%u)",
+                     in.pad_buttons, in.pad_buttons - pi->pad_buttons, in.pad_axes, in.pad_axes - pi->pad_axes,
+                     last_pad_ms, (unsigned) input_manager_sdl_gamepad_count(manager->app->input_manager),
+                     in.controllers_added, in.controllers_removed, in.joystick_lost, in.keys, in.keys - pi->keys);
+    manager->input_prev = in;
+}
+
+static void stats_timer_cb(lv_timer_t *timer) {
+    log_stats(timer->user_data);
+}
+
+static void toast_timer_cb(lv_timer_t *timer) {
+    lv_obj_t *label = timer->user_data;
+    // The timer was created with a repeat count of 1, so LVGL deletes it after this call
+    (void) timer;
+    lv_obj_del(label);
+}
+
+void stream_manager_user_mark(stream_manager_t *manager) {
+    app_assert_main_thread(manager->app);
+    int n = ++manager->mark_count;
+    // Warn: it must stand out, be flushed at once, and never be folded or dropped by the log limiters
+    commons_log_warn("MARK", "=== USER MARK %d ===", n);
+    log_stats(manager);
+    char text[48];
+    snprintf(text, sizeof(text), "Mark %d saved in the log", n);
+    lv_obj_t *label = lv_label_create(lv_layer_top());
+    lv_label_set_text(label, text);
+    lv_obj_set_style_bg_color(label, lv_color_black(), 0);
+    lv_obj_set_style_bg_opa(label, LV_OPA_70, 0);
+    lv_obj_set_style_text_color(label, lv_color_white(), 0);
+    lv_obj_set_style_pad_all(label, LV_DPX(10), 0);
+    lv_obj_align(label, LV_ALIGN_TOP_MID, 0, LV_DPX(20));
+    lv_timer_t *timer = lv_timer_create(toast_timer_cb, 2000, label);
+    lv_timer_set_repeat_count(timer, 1);
 }

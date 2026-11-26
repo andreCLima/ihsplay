@@ -5,6 +5,7 @@
 
 #include "array_list.h"
 #include "lvgl.h"
+#include "util/input_stats.h"
 
 typedef enum stream_manager_state_t {
     STREAM_MANAGER_STATE_IDLE,
@@ -25,6 +26,8 @@ struct stream_manager_t {
     // Periodic STATS line in the log, and the totals it last saw (all on the main thread)
     lv_timer_t *stats_timer;
     IHS_SessionStreamStats stats_prev;
+    input_stats_t input_prev;
+    int mark_count;
     stream_media_stats_t media_stats_prev;
     int back_counter;
     bool overlay_opened;

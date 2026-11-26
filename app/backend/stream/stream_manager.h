@@ -57,3 +57,9 @@ bool stream_manager_set_overlay_opened(stream_manager_t *manager, bool opened);
 void stream_manager_set_capture_size(stream_manager_t *manager, int width, int height);
 
 bool stream_manager_is_active(const stream_manager_t *manager);
+
+/**
+ * Puts "=== USER MARK n ===" and a snapshot of the stats in the log, and a short notice on the screen. For the user to
+ * press (a coloured key of the TV remote) at the moment something freezes.
+ */
+void stream_manager_user_mark(stream_manager_t *manager);
