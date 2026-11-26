@@ -29,6 +29,8 @@ struct stream_manager_t {
     input_stats_t input_prev;
     int mark_count;
     stream_media_stats_t media_stats_prev;
+    /* SDL_GetTicks() of the previous stats line: a user mark logs in between, so intervals vary */
+    uint32_t stats_prev_ticks;
     int back_counter;
     bool overlay_opened;
     bool requested_disconnect;

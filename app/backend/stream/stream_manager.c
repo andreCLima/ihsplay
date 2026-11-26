@@ -404,6 +404,7 @@ static void session_connected_main(app_t *app, void *context) {
     memset(&manager->stats_prev, 0, sizeof(manager->stats_prev));
     input_stats_get(&manager->input_prev);
     memset(&manager->media_stats_prev, 0, sizeof(manager->media_stats_prev));
+    manager->stats_prev_ticks = SDL_GetTicks();
     if (manager->stats_timer == NULL) {
         manager->stats_timer = lv_timer_create(stats_timer_cb, STATS_INTERVAL_MS, manager);
     }
@@ -526,12 +527,18 @@ static void log_stats(stream_manager_t *manager) {
     stream_media_get_stats(manager->media, &m);
     const stream_media_stats_t *pm = &manager->media_stats_prev;
     const IHS_SessionStreamStats *ps = &manager->stats_prev;
-    const uint32_t secs = STATS_INTERVAL_MS / 1000;
+    // Rates over the time that really passed: a user mark logs between two periodic lines.
+    const uint32_t now_ticks = SDL_GetTicks();
+    uint32_t elapsed_ms = now_ticks - manager->stats_prev_ticks;
+    if (elapsed_ms == 0) {
+        elapsed_ms = 1;
+    }
+    manager->stats_prev_ticks = now_ticks;
     commons_log_info("STATS", "fps=%u kbps=%u dropped=%u | pkts=%u lost=%u(+%u) lostRep=%u(+%u) fec=%d rec=%u unrec=%u"
                               " | rtt=%.0fms | audio=%u lost=%u | rexmit=%u(+%u) gaveUp=%u maxDelay=%ums"
                               " ackCum=%u(+%u) | hidFull=%u(+%u) hidSlow=%u",
-                     (m.video_frames - pm->video_frames) / secs,
-                     (uint32_t) ((uint64_t) (m.video_bytes - pm->video_bytes) * 8 / (secs * 1000)),
+                     (uint32_t) ((uint64_t) (m.video_frames - pm->video_frames) * 1000 / elapsed_ms),
+                     (uint32_t) ((uint64_t) (m.video_bytes - pm->video_bytes) * 8 / elapsed_ms),
                      m.video_dropped - pm->video_dropped, s.videoPackets, s.videoPacketsLost,
                      s.videoPacketsLost - ps->videoPacketsLost, s.lostReports, s.lostReports - ps->lostReports,
                      s.fec, s.fecRecovered, s.fecUnrecoverable, (double) s.roundTripMs,
