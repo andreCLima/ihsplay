@@ -1,10 +1,17 @@
 cmake_minimum_required(VERSION 3.16)
 
-execute_process(COMMAND git describe --tags --abbrev=0 WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-        OUTPUT_VARIABLE IHSPLAY_VERSION ERROR_QUIET)
-if (IHSPLAY_VERSION)
-    string(STRIP "${IHSPLAY_VERSION}" IHSPLAY_VERSION)
-    string(SUBSTRING "${IHSPLAY_VERSION}" 1 -1 IHSPLAY_VERSION)
+# Version from the last vX.Y.Z tag. A build with commits after it gets the next patch number
+# (v0.2.12 plus 28 commits builds as 0.2.13): otherwise it carried the tag's own number, and the
+# Homebrew Channel saw the official 0.2.12 as the same version and could put it back over the build.
+# Without tags (a clone that didn't fetch them) the version falls back to 0.0.0.
+execute_process(COMMAND git describe --tags --long --match "v[0-9]*" WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        OUTPUT_VARIABLE IHSPLAY_DESCRIBE ERROR_QUIET OUTPUT_STRIP_TRAILING_WHITESPACE)
+if (IHSPLAY_DESCRIBE MATCHES "^v([0-9]+)\\.([0-9]+)\\.([0-9]+)-([0-9]+)-g")
+    set(IHSPLAY_PATCH ${CMAKE_MATCH_3})
+    if (CMAKE_MATCH_4 GREATER 0)
+        math(EXPR IHSPLAY_PATCH "${IHSPLAY_PATCH} + 1")
+    endif ()
+    set(IHSPLAY_VERSION "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${IHSPLAY_PATCH}")
 else ()
     set(IHSPLAY_VERSION "0.0.0")
 endif ()
