@@ -114,6 +114,12 @@ add_subdirectory(app)
 target_include_directories(ihsplay PRIVATE app)
 target_compile_definitions(ihsplay PRIVATE STREAM_BITRATE_KBPS=${STREAM_BITRATE_KBPS})
 
+# app/util/applog.c copies every commons log message into a log file the user can read. Wrapping the one function
+# they all end in avoids patching the commons submodule.
+if (NOT APPLE AND NOT MSVC)
+    target_link_options(ihsplay PRIVATE -Wl,--wrap=commons_log_vprintf)
+endif ()
+
 target_link_libraries(ihsplay PRIVATE lvgl ihslib ihslib-hid-sdl ss4s commons-array-list commons-os-info
         commons-logging commons-ss4s-modules-list)
 target_link_libraries(ihsplay PRIVATE lv_gridview)
@@ -153,6 +159,12 @@ endif ()
 
 if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     set(IHSPLAY_IS_DEBUG ON)
+endif ()
+
+execute_process(COMMAND git -C ${CMAKE_SOURCE_DIR} rev-parse --short=8 HEAD
+        OUTPUT_VARIABLE IHSPLAY_GIT_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+if (NOT IHSPLAY_GIT_COMMIT)
+    set(IHSPLAY_GIT_COMMIT "unknown")
 endif ()
 
 configure_file(app/config.h.in ${CMAKE_CURRENT_BINARY_DIR}/config.h @ONLY)

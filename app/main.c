@@ -20,6 +20,7 @@
 #include "logging_ext_sdl.h"
 #include "logging_ext_lvgl.h"
 #include "os_info.h"
+#include "util/applog.h"
 
 #if IHSPLAY_FEATURE_LIBCEC
 
@@ -39,6 +40,9 @@ int main(int argc, char *argv[]) {
     logging_init();
     app_preinit(argc, argv);
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER | SDL_INIT_HAPTIC);
+    applog_open();
+    commons_log_info("APP", "IHSplay %s (%s), built %s %s", IHSPLAY_VERSION_STRING, IHSPLAY_GIT_COMMIT, __DATE__,
+                     __TIME__);
 
     os_info_t os_info;
     if (os_info_get(&os_info) == 0) {
@@ -125,6 +129,7 @@ int main(int argc, char *argv[]) {
 
     SDL_Quit();
     commons_logging_deinit();
+    applog_close();
     os_info_clear(&os_info);
     return 0;
 }
