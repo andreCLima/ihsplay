@@ -566,8 +566,15 @@ static void log_stats(stream_manager_t *manager) {
                      s.inputDisabledDrops, s.sendQueueDepthMax, s.sendQueueLatencyMaxMs,
                      s.controlPacketsSent - ps->controlPacketsSent, s.timerLagMaxMs, s.controlAckCount,
                      s.controlAckAvgMs, s.controlAckMaxMs, s.controlOldestPendingMs, s.controlAckStalls);
+    // The other direction: what Steam sends us on the control channel (its HID requests among it).
+    commons_log_info("FROMSTEAM", "ctrl pkts=+%u resent=+%u dup=+%u holeAcks=+%u holeMax=%ums msgs=+%u"
+                                  " | hid jobs=+%u wait=%ums run=%ums",
+                     s.ctrlRxPackets - ps->ctrlRxPackets, s.ctrlRxResent - ps->ctrlRxResent,
+                     s.ctrlRxDuplicate - ps->ctrlRxDuplicate, s.ctrlAckHoles - ps->ctrlAckHoles, s.ctrlHoleMaxMs,
+                     s.ctrlRxMessages - ps->ctrlRxMessages, s.hidJobs - ps->hidJobs, s.hidJobWaitMaxMs,
+                     s.hidJobRunMaxMs);
     manager->input_prev = in;
-    // Only now: the INPUT line above takes its differences from the previous stats too.
+    // Only now: the lines above take their differences from the previous stats too.
     manager->stats_prev = s;
 }
 
