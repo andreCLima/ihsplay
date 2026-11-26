@@ -27,7 +27,7 @@ static pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
 static FILE *file = NULL;
 static bool open_attempted = false;
 static bool closed = false;
-static char path[1024], old_path[1024];
+static char path[1024], old_path[1024], marker[1024];
 static size_t written = 0;
 static commons_log_level file_level = COMMONS_LOG_LEVEL_INFO;
 static int64_t last_flush_ms = 0;
@@ -295,7 +295,6 @@ void applog_open(void) {
         return;
     }
     open_attempted = true;
-    static char marker[1024];
     marker[0] = '\0';
     if (dir != NULL) {
         /* On webOS, SDL_GetPrefPath gives the app's own folder with no trailing slash, so these
@@ -351,4 +350,12 @@ void applog_close(void) {
 
 const char *applog_path(void) {
     return path[0] != '\0' ? path : NULL;
+}
+
+const char *applog_debug_marker_path(void) {
+    return marker[0] != '\0' ? marker : NULL;
+}
+
+bool applog_is_debug(void) {
+    return file_level == COMMONS_LOG_LEVEL_DEBUG;
 }
