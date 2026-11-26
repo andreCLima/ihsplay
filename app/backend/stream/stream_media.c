@@ -190,7 +190,9 @@ static int audio_start(IHS_Session *session, const IHS_StreamAudioConfig *config
             .appName = "IHSplay",
             .streamName = "Streaming",
     };
+    Uint32 open_start = SDL_GetTicks();
     int open_result = SS4S_PlayerAudioOpen(media_session->player, &info);
+    commons_log_info("Media", "Audio decoder opened in %u ms (result %d)", SDL_GetTicks() - open_start, open_result);
     if (open_result != SS4S_AUDIO_OPEN_OK) {
         // The session may not call stop for a start that failed; audio_stop is safe to run twice.
         audio_stop(session, context);
@@ -295,7 +297,11 @@ static int video_start(IHS_Session *session, const IHS_StreamVideoConfig *config
     };
     media_session->video_info = info;
     SDL_UnlockMutex(media_session->lock);
-    return SS4S_PlayerVideoOpen(media_session->player, &info);
+    /* The first picture waits on this: the NDL took about 270 ms on the 50UA7500 (webOS 25). */
+    Uint32 open_start = SDL_GetTicks();
+    int open_result = SS4S_PlayerVideoOpen(media_session->player, &info);
+    commons_log_info("Media", "Video decoder opened in %u ms (result %d)", SDL_GetTicks() - open_start, open_result);
+    return open_result;
 }
 
 static void video_stop(IHS_Session *session, void *context) {

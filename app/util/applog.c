@@ -295,10 +295,15 @@ void applog_open(void) {
         return;
     }
     open_attempted = true;
+    static char marker[1024];
+    marker[0] = '\0';
     if (dir != NULL) {
+        /* On webOS, SDL_GetPrefPath gives the app's own folder with no trailing slash, so these
+         * names land next to it (applications/org.mariotaku.ihsplayihsplay.log), as does
+         * host_keys.txt. Left as is on purpose: there they have survived every reinstall, and
+         * inside the app's folder an update could remove them, and the pairing with them. */
         snprintf(path, sizeof(path), "%sihsplay.log", dir);
         snprintf(old_path, sizeof(old_path), "%sihsplay.1.log", dir);
-        char marker[1024];
         snprintf(marker, sizeof(marker), "%sdebug", dir);
         FILE *marker_file = fopen(marker, "r");
         if (marker_file != NULL) {
@@ -325,8 +330,8 @@ void applog_open(void) {
     pthread_mutex_unlock(&lock);
     SDL_free(dir);
     if (path[0] != '\0') {
-        commons_log_info("AppLog", "Logging to %s (level %s; create a file named `debug` next to it for Debug)", path,
-                         file_level == COMMONS_LOG_LEVEL_DEBUG ? "Debug" : "Info");
+        commons_log_info("AppLog", "Logging to %s (level %s; an empty file %s turns on Debug)", path,
+                         file_level == COMMONS_LOG_LEVEL_DEBUG ? "Debug" : "Info", marker);
     } else {
         commons_log_warn("AppLog", "Can't open a log file, logging to PmLog only");
     }
