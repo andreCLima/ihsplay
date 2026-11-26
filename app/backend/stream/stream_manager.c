@@ -540,7 +540,6 @@ static void log_stats(stream_manager_t *manager) {
                      s.retransmitMaxDelayMs, s.ackCumulativeCancels,
                      s.ackCumulativeCancels - ps->ackCumulativeCancels, s.hidFullReportRequests,
                      s.hidFullReportRequests - ps->hidFullReportRequests, s.hidSlowJobs);
-    manager->stats_prev = s;
     manager->media_stats_prev = m;
 
     // What reached the app from the controller, to compare with what the stream then sent to the host.
@@ -549,11 +548,20 @@ static void log_stats(stream_manager_t *manager) {
     const input_stats_t *pi = &manager->input_prev;
     int last_pad_ms = in.last_pad_ticks == 0 ? -1 : (int) (SDL_GetTicks() - in.last_pad_ticks);
     commons_log_info("INPUT", "pad buttons=%u(+%u) axes=%u(+%u) lastPadEvent=%dms ago | pads=%u added=%u removed=%u"
-                              " joyLost=%u | keys=%u(+%u)",
+                              " joyLost=%u | keys=%u(+%u) | hid gen=+%u sent=+%u lockWait=%ums stalls=%u"
+                              " | steamInput=%u flips=%u dropped=%u | sendQ depth=%u wait=%ums ctrlSent=+%u timerLag=%ums"
+                              " | ctrlAck n=%u avg=%ums max=%ums oldest=%ums stalls=%u",
                      in.pad_buttons, in.pad_buttons - pi->pad_buttons, in.pad_axes, in.pad_axes - pi->pad_axes,
                      last_pad_ms, (unsigned) input_manager_sdl_gamepad_count(manager->app->input_manager),
-                     in.controllers_added, in.controllers_removed, in.joystick_lost, in.keys, in.keys - pi->keys);
+                     in.controllers_added, in.controllers_removed, in.joystick_lost, in.keys, in.keys - pi->keys,
+                     s.hidReportsGenerated - ps->hidReportsGenerated, s.hidReportsSent - ps->hidReportsSent,
+                     s.hidUseLockMaxWaitMs, s.hidInputStalls, s.inputEnabled, s.inputTransitions,
+                     s.inputDisabledDrops, s.sendQueueDepthMax, s.sendQueueLatencyMaxMs,
+                     s.controlPacketsSent - ps->controlPacketsSent, s.timerLagMaxMs, s.controlAckCount,
+                     s.controlAckAvgMs, s.controlAckMaxMs, s.controlOldestPendingMs, s.controlAckStalls);
     manager->input_prev = in;
+    // Only now: the INPUT line above takes its differences from the previous stats too.
+    manager->stats_prev = s;
 }
 
 static void stats_timer_cb(lv_timer_t *timer) {
